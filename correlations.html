@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="author" content="Raoul P. P. P. Grasman">
+    <meta name="copyright" content="Raoul P. P. P. Grasman, 2024">
+    <meta name="license" content="CC BY 4.0">
+    <meta name="description" content="A web application that computes the JZS Bayes factor from a t-test result. Calculate Bayes factors easily and accurately.">
+    <meta name="keywords" content="correlation, test, statistical analysis, power, calculator">
+    <meta property="og:title" content="Correlation Test Power">
+    <meta property="og:description" content="Do power calculations for a test of Pearson Moment Correlation Coefficient in an easy-to-use web application.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://raoelg.github.io/correlation-power/">
+    <meta property="og:image" content="https://raoelg.github.io/correlation-power/correlation-power.png">
+
+    <link rel="canonical" href="https://raoelg.github.io/correlation-power/">
+    <link rel="license" href="https://creativecommons.org/licenses/by/4.0/">
+
+    <title>Correlation Test Power | Statistical Analysis Tool</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+
+    <script async defer src="https://scripts.simpleanalyticscdn.com/latest.js"></script><!-- 100% privacy-first analytics -->
+    <script defer src="https://cloud.umami.is/script.js" data-website-id="66c70770-68ae-46e7-8e89-1867eb39d571"></script>
+    <script type="application/ld+json">
+        {
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            "name": "Correlation Power Calculator",
+            "description": "A web application that computes the power of a correlation significance test.",
+            "applicationCategory": "ScientificApplication",
+            "operatingSystem": "All",
+            "url": "https://raoelg.github.io",
+            "author": {
+                "@type": "Person",
+                "name": "Raoul Grasman"
+            }
+        }
+    </script>
+
+</head>
+<body>
+<div class="container mt-5">
+    <h2>Correlation Hypothesis Testing</h2>
+    <form id="inputForm">
+        <div class="row">
+            <div class="col-md-6">
+                <div class="form-group">
+                    <label for="nPairs">Number of Observation Pairs</label>
+                    <input type="number" class="form-control" id="nPairs" placeholder="Enter number of pairs" required>
+                </div>
+                <div class="form-group">
+                    <label for="rho0">Null Hypothesis Value (ρ₀)</label>
+                    <input type="number" class="form-control" id="rho0" value="0" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label for="rho1">Alternative Hypothesis Value (ρ₁)</label>
+                    <input type="number" class="form-control" id="rho1" placeholder="Enter alternative value" step="0.01" required>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="form-group">
+                    <label for="alpha">Alpha Level (α)</label>
+                    <input type="range" class="form-control-range" id="alpha" min="0" max="0.4" step="0.0001" value="0.05" oninput="updateAlphaLabel(this.value)">
+                    <span id="alphaValue">0.05</span>
+                </div>
+                <div class="form-group">
+                    <label for="power">Power Level (1 - β)</label>
+                    <input type="range" class="form-control-range" id="power" min="0" max="1" step="0.01" value="0.80" oninput="updatePowerLabel(this.value)">
+                    <span id="powerValue">0.80</span>
+                </div>
+                <button type="button" class="btn btn-primary mt-3" onclick="drawPlot()">Generate Plot</button>
+            </div>
+        </div>
+    </form>
+    <div class="mt-5" title="Click to download image" >
+        <svg id="plot" width="600" height="400" style="cursor:pointer;" onclick="openPlotAsSvg()"></svg>
+    </div>
+    <div><p>All computations are based on the Fisher-Z approximation which is rough (but still usable) for <em>n</em> < 30.</p></div>
+</div>
+
+<footer>
+    <p style="color:gray;font-size: 7pt;position:absolute;bottom:-10px;right:10px;">© 2024 Raoul Grasman. <a rel="license" href="https://creativecommons.org/licenses/by/4.0/">This work is licensed under a Creative Commons Attribution 4.0 International License</a>.</p>
+</footer>
+
+
+<script>
+    function updateAlphaLabel(value) {
+        document.getElementById('alphaValue').innerText = parseFloat(value).toFixed(4);
+        drawPlot();
+    }
+    function updatePowerLabel(value, onlyLabel) {
+        const power = parseFloat(value)
+        document.getElementById('powerValue').innerText = power.toFixed(3);
+        document.getElementById('power').value = power;
+        if (!onlyLabel)
+            updatePower(power);
+    }
+    function updatePower(value) {
+        const rho0 = parseFloat(document.getElementById('rho0').value);
+        const rho1 = parseFloat(document.getElementById('rho1').value);
+        const alpha = parseFloat(document.getElementById('alpha').value);
+        const power = parseFloat(value).toFixed(3);
+        document.getElementById('nPairs').value = sampleSize(rho1, rho0, power, alpha);
+
+    }
+    function drawPlot() {
+        const nPairs = parseInt(document.getElementById('nPairs').value);
+        const rho0 = parseFloat(document.getElementById('rho0').value);
+        const rho1 = parseFloat(document.getElementById('rho1').value);
+        const alpha = parseFloat(document.getElementById('alpha').value);
+
+        const svg = document.getElementById('plot');
+        while (svg.firstChild) {
+            svg.removeChild(svg.firstChild);
+        }
+
+        // Basic setup for SVG drawing
+        const width = 600;
+        const height = 400;
+        const margin = 40;
+        const plotWidth = width - 2 * margin;
+        const plotHeight = height - 2 * margin;
+        const xScale = d3.scaleLinear().domain([-1, 1]).range([0, plotWidth]);
+
+        // Draw x-axis
+        const xAxis = d3.axisBottom(xScale).ticks(10);
+        d3.select(svg).append('g')
+            .attr('transform', `translate(${margin}, ${height - margin})`)
+            .style('font-size','14px')
+            .call(xAxis);
+
+        // Add x-axis label
+        d3.select(svg).append('text')
+            .attr('x', margin + plotWidth / 2)
+            .attr('y', height - 0)
+            .attr('text-anchor', 'middle')
+            .style('font-size', '16px')
+            .style('font-style', 'italic')
+            .text('r');
+
+        // Generate density data for the null hypothesis (ρ₀)
+        const sigmaNull = Math.sqrt((1-0*rho0*rho0) / (nPairs-3))
+        let atanh = x => Math.log((1+x)/(1-x)) * 0.5;
+        let tanh = x => (Math.exp(2*x) - 1) / (Math.exp(2*x) + 1)
+        const densityNull = d3.range(-1, 1.01, 0.01).map(x => ({
+            x,
+            //y: Math.exp(-0.5*Math.pow(x - rho0, 2) / sigmaNull) / Math.sqrt(2*Math.PI) / sigmaNull // density function under H0
+            y: (x*x >= 1) ? 0 : dnorm(atanh(x), atanh(rho0), sigmaNull) / (1-x*x)
+        }));
+        console.log(densityNull)
+
+        // Generate density data for the alternative hypothesis (ρ₁)
+        const sigmaAlt = Math.sqrt((1-0*rho1*rho1) / (nPairs-3))
+        const densityAlt = d3.range(-1, 1.01, 0.01).map(x => ({
+            x,
+            //y: Math.exp(-0.5*Math.pow(x - rho1, 2) / sigmaAlt)  / Math.sqrt(2*Math.PI) / sigmaAlt // density function under HA
+            y: (x*x >= 1) ? 0 : dnorm(atanh(x), atanh(rho1), sigmaAlt) / (1-x*x)
+        }));
+
+        const yScale = d3.scaleLinear()
+            .domain([0, d3.max([...densityNull, ...densityAlt], d => d.y)])
+            .range([plotHeight, 0]);
+
+        // Line generator for densities
+        const line = d3.line()
+            .x(d => xScale(d.x))
+            .y(d => yScale(d.y));
+
+        // Draw the density under the null hypothesis (dotted line)
+        d3.select(svg).append('path')
+            .datum(densityNull)
+            .attr('fill', 'none')
+            .attr('stroke', 'black')
+            .attr('stroke-width', 1.5)
+            .attr('stroke-dasharray', '4,2')
+            .attr('transform', `translate(${margin}, ${margin})`)
+            .attr('d', line);
+
+        // Draw the density under the alternative hypothesis (solid line)
+        d3.select(svg).append('path')
+            .datum(densityAlt)
+            .attr('fill', 'none')
+            .attr('stroke', 'steelblue')
+            .attr('stroke-width', 1.5)
+            .attr('transform', `translate(${margin}, ${margin})`)
+            .attr('d', line);
+
+        // Highlight significant region according to the sign of ρ₁
+        const criticalValue = qnorm(1-alpha) / Math.sqrt(nPairs - 3); // Approximation for large n
+        let significantRegion;
+        if (rho1 > 0) {
+            significantRegion = [tanh(atanh(rho0) + criticalValue), 1];
+        } else {
+            significantRegion = [-1, tanh(atanh(rho0) - criticalValue)];
+        }
+
+        d3.select(svg).append('rect')
+            .attr('x', margin + xScale(significantRegion[0]))
+            .attr('y', margin)
+            .attr('width', xScale(significantRegion[1]) - xScale(significantRegion[0]))
+            .attr('height', plotHeight)
+            .attr('fill', 'red')
+            .attr('opacity', 0.3);
+
+        // Calculate power and add annotation
+        const power = calculatePower(densityAlt, significantRegion, rho0, rho1, criticalValue, nPairs);
+        updatePowerLabel(power, true);
+        const annotationX = margin + xScale((significantRegion[0] + significantRegion[1]) / 2);
+        const annotationY = margin - 10;
+
+        d3.select(svg).append('text')
+            .attr('x', annotationX)
+            .attr('y', annotationY)
+            .attr('text-anchor', 'middle')
+            .style('font-size', '14px')
+            .attr('fill', 'red')
+            .text(`Power: ${power.toFixed(2)}`);
+
+        // Draw line connecting the annotation to the region
+        /*
+        d3.select(svg).append('line')
+            .attr('x1', annotationX)
+            .attr('y1', annotationY + 5)
+            .attr('x2', margin + xScale(significantRegion[0] + (rho1 > 0 ? -0.1 : 0.1)))
+            .attr('y2', margin + plotHeight - 10)
+            .attr('stroke', 'red')
+            .attr('stroke-width', 1);
+        */
+
+        // Draw a line on the edge of the critical area
+        d3.select(svg).append('line')
+            .attr('x1', margin + xScale(rho1 > 0 ? significantRegion[0] : significantRegion[1]))
+            .attr('y1', margin)
+            .attr('x2', margin + xScale(rho1 > 0 ? significantRegion[0] : significantRegion[1]))
+            .attr('y2', height - 15)
+            .attr('stroke', 'red')
+            .attr('stroke-width', 1);
+
+        // Add critical r-value
+        d3.select(svg).append('text')
+            .attr('x', margin + xScale(rho1 > 0 ? significantRegion[0] : significantRegion[1]))
+            .attr('y', height - 0)
+            .attr('text-anchor', 'middle')
+            .style('font-size', '12px')
+            .attr('fill', 'red')
+            .text(`${(rho1 > 0 ? significantRegion[0] : significantRegion[1]).toFixed(2)}`);
+
+        // Add title
+            /*
+        d3.select(svg).append('text')
+            .attr('x', margin + xScale(-1.0)) //rho1 > 0 ? 70 : width - 210)
+            .attr('y', margin - 20)
+            .attr('fill', 'black')
+            .style('font-size', '20px')
+            .text(`Sample distribution of r`)
+            .style('cursor', 'default');
+            */
+
+        d3.select(svg).append('text')
+            .attr('x', margin + xScale(rho0)) //rho1 > 0 ? 70 : width - 210)
+            .attr('y', height - 50)
+            .attr('text-anchor', 'middle')
+            .attr('fill', 'black')
+            .style('font-size', '14px')
+            .style('font-style', 'italic')
+            .text(`ρ₀`)
+            .style('cursor', 'default');
+
+        d3.select(svg).append('text')
+            .attr('x', margin + xScale(rho1)) //rho1 > 0 ? 70 : width - 210)
+            .attr('y', height - 50)
+            .attr('text-anchor', 'middle')
+            .attr('fill', 'steelblue')
+            .style('font-size', '14px')
+            .style('font-style', 'italic')
+            .text(`ρ₁`)
+            .style('cursor', 'default');
+
+        // Add legend
+        d3.select(svg).append('text')
+            .attr('x', rho1 > 0 ? 70 : width - 210)
+            .attr('y', margin + 60)
+            .attr('fill', 'black')
+            .style('font-size', '14px')
+            .text(`n = ${nPairs}`)
+            .style('cursor', 'default');
+
+        d3.select(svg).append('text')
+            .attr('x', rho1 > 0 ? 70 : width - 210)
+            .attr('y', margin + 20)
+            .attr('fill', 'black')
+            .style('font-size', '14px')
+            .text('Likelihood of r when ρ = ρ₀')
+            .style('cursor', 'default');
+
+        d3.select(svg).append('line')
+            .attr('x1', rho1 > 0 ? 40 : width - 220)
+            .attr('x2', rho1 > 0 ? 60 : width - 240)
+            .attr('y1', margin + 15)
+            .attr('y2', margin + 15)
+            .attr('stroke', 'black')
+            .attr('stroke-width', 1.5)
+            .attr('stroke-dasharray', '4,2');
+
+        d3.select(svg).append('text')
+            .attr('x', rho1 > 0 ? 70 : width - 210)
+            .attr('y', margin + 40)
+            .attr('fill', 'steelblue')
+            .style('font-size', '14px')
+            .text('Likelihood of r when ρ = ρ₁')
+            .style('cursor', 'default');
+
+        d3.select(svg).append('line')
+            .attr('x1', rho1 > 0 ? 40 : width - 220)
+            .attr('x2', rho1 > 0 ? 60 : width - 240)
+            .attr('y1', margin + 35)
+            .attr('y2', margin + 35)
+            .attr('stroke', 'steelblue')
+            .attr('stroke-width', 1.5);
+
+    }
+
+    function calculatePower(density, critRegion, rho0, rho1, criticalValue, nPairs) {
+        // Placeholder for power calculation logic
+        // This function should compute the power given the density function and critical value
+        // Here, it returns a mock value for demonstration purposes
+        //return 0.80; // Mock power value
+        window.dens = density
+        //return 1-pnorm(criticalValue + (Math.atanh(rho1)-Math.atanh(rho0))/Math.sqrt(1/(nPairs-3)));
+        // criticalValue = qnorm(1-.025)
+
+        var power = 0.0;
+        for (var i=0; i < density.length - 1; i++) {
+            if (density[i]['x'] >= critRegion[0] & density[i]['x'] < critRegion[1]) {
+                power += (density[i+1]['x']-density[i]['x'])*(density[i]['y'] + density[i+1]['y']) / 2;
+            }
+        }
+        //return pnorm(criticalValue - (Math.atanh(rho1)-Math.atanh(rho0)) / Math.sqrt(1/(nPairs-3)))
+        return power;
+    }
+
+    function dnorm(x, mu=0, sd=0) {
+        return Math.exp(-0.5 * (x-mu)*(x-mu) / (sd*sd)) / Math.sqrt(2*Math.PI) / sd
+    }
+
+    function pnorm(x) {
+          // Constants
+          const sqrt2 = Math.sqrt(2);
+
+          // Error function approximation
+          function erf(z) {
+            // Constants for the approximation
+            const a1 =  0.254829592;
+            const a2 = -0.284496736;
+            const a3 =  1.421413741;
+            const a4 = -1.453152027;
+            const a5 =  1.061405429;
+            const p  =  0.3275911;
+
+            // Save the sign of z
+            const sign = z >= 0 ? 1 : -1;
+            z = Math.abs(z);
+
+            // Approximate the error function
+            const t = 1.0 / (1.0 + p * z);
+            const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-z * z);
+
+            return sign * y;
+          }
+
+          // Calculate the CDF of the standard normal distribution
+          return 0.5 * (1 + erf(x / sqrt2));
+    }
+
+    function qnorm(p) {
+        return binarySearchForValue(pnorm, p, -100, 100)
+    }
+
+    function sampleSize(rho1, rho0, power, alpha) {
+        alpha = alpha || 0.05;
+        const z1 = Math.atanh(rho1);
+        const z0 = Math.atanh(rho0);
+        const Qalpha = qnorm(1-alpha);
+        const Qbeta = qnorm(1-power);
+        
+        return Math.ceil(Math.pow(Qalpha - Qbeta,2) / Math.pow(z1 - z0,2) + 3)
+    }
+
+    function binarySearchForValue(f, y, x_left, x_right, precision = 1e-9) {
+      let left = x_left;
+      let right = x_right;
+      let middle;
+
+      while (right - left > precision) {
+        middle = (left + right) / 2;
+        const f_middle = f(middle);
+
+        if (Math.abs(f_middle - y) < precision) {
+          return middle;
+        }
+
+        if (f_middle < y) {
+          left = middle;
+        } else {
+          right = middle;
+        }
+      }
+
+      // When the loop exits, left and right are close enough
+      return (left + right) / 2;
+    }
+
+
+    function openPlotAsPng() {
+        const svg = document.getElementById('plot');
+        const svgData = new XMLSerializer().serializeToString(svg);
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+
+        canvas.width = svg.clientWidth;
+        canvas.height = svg.clientHeight;
+
+        img.onload = function() {
+            ctx.drawImage(img, 0, 0);
+            const pngFile = canvas.toDataURL('image/png');
+            const link = document.createElement('a');
+            link.download = 'plot.png';
+            link.href = pngFile;
+            link.target = '_blank';
+            link.click();
+        };
+
+        img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+    }
+
+    function openPlotAsSvg() {
+        const svg = document.getElementById('plot');
+        const svgData = new XMLSerializer().serializeToString(svg);
+        const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+        const svgUrl = URL.createObjectURL(svgBlob);
+        const link = document.createElement('a');
+
+        link.href = svgUrl;
+        link.target = '_blank';
+        //link.download = 'plot.svg';
+        link.click();
+    }
+
+</script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+</body>
+</html>
